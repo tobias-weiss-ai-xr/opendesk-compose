@@ -234,12 +234,12 @@ fn init_logging() {
 
 fn load_config() -> AppConfig {
     AppConfig {
-        portal_domain: load_env("PORTAL_DOMAIN", "portal.opendesk.example.com"),
-        opendesk_domain: load_env("OPENDESK_DOMAIN", "opendesk.example.com"),
-        opencloud_url: load_env("OPENCLOUD_URL", "https://cloud.opendesk.example.com"),
-        mail_url: load_env("MAIL_URL", "https://webmail.opendesk.example.com"),
-        keycloak_url: load_env("KEYCLOAK_URL", "https://auth.opendesk.example.com"),
-        collabora_url: load_env("COLLABORA_URL", "https://collabora.opendesk.example.com"),
+        portal_domain: load_env("PORTAL_DOMAIN", "portal.opendesk-sme.org"),
+        opendesk_domain: load_env("OPENDESK_DOMAIN", "opendesk-sme.org"),
+        opencloud_url: load_env("OPENCLOUD_URL", "https://cloud.opendesk-sme.org"),
+        mail_url: load_env("MAIL_URL", "https://webmail.opendesk-sme.org"),
+        keycloak_url: load_env("KEYCLOAK_URL", "https://auth.opendesk-sme.org"),
+        collabora_url: load_env("COLLABORA_URL", "https://collabora.opendesk-sme.org"),
     }
 }
 

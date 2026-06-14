@@ -19,10 +19,10 @@ services:
       OC_LOG_PRETTY: ${LOG_PRETTY:-true}
       OC_ADMIN_USERNAME: ${OC_ADMIN_USERNAME:-admin}
       OC_ADMIN_PASSWORD: ${OC_ADMIN_PASSWORD:-CHANGEME_oc_admin}
-      OC_DOMAIN: ${OPENCLOUD_DOMAIN:-cloud.opendesk.example.com}
-      OC_URL: https://${OPENCLOUD_DOMAIN:-cloud.opendesk.example.com}
-      OC_IDP_URL: https://${KEYCLOAK_DOMAIN:-auth.opendesk.example.com}/auth
-      OC_OIDC_ISSUER: https://${KEYCLOAK_DOMAIN:-auth.opendesk.example.com}/auth/realms/opendesk
+      OC_DOMAIN: ${OPENCLOUD_DOMAIN:-cloud.opendesk-sme.org}
+      OC_URL: https://${OPENCLOUD_DOMAIN:-cloud.opendesk-sme.org}
+      OC_IDP_URL: https://${KEYCLOAK_DOMAIN:-auth.opendesk-sme.org}/auth
+      OC_OIDC_ISSUER: https://${KEYCLOAK_DOMAIN:-auth.opendesk-sme.org}/auth/realms/opendesk
       OC_OIDC_CLIENT_ID: opencloud
       OC_OIDC_CLIENT_SECRET: ${OC_OIDC_SECRET:-CHANGEME_oidc_secret}
       PROXY_ROLE_ASSIGNMENT_DRIVER: oidc
@@ -46,7 +46,7 @@ services:
       - opendesk-net
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.opencloud.rule=Host(`${OPENCLOUD_DOMAIN:-cloud.opendesk.example.com}`)"
+      - "traefik.http.routers.opencloud.rule=Host(`${OPENCLOUD_DOMAIN:-cloud.opendesk-sme.org}`)"
       - "traefik.http.routers.opencloud.tls=true"
       - "traefik.http.routers.opencloud.tls.certresolver=letsencrypt"
       - "traefik.http.services.opencloud.loadbalancer.server.port=9200"
@@ -64,14 +64,14 @@ services:
     container_name: opendesk-collabora
     restart: unless-stopped
     environment:
-      aliasgroup1: https://${OPENCLOUD_DOMAIN:-cloud.opendesk.example.com}:443
+      aliasgroup1: https://${OPENCLOUD_DOMAIN:-cloud.opendesk-sme.org}:443
       extra_params: >-
         --o:ssl.enable=false
         --o:ssl.termination=true
         --o:num_prespawn_children=4
         --o:max_connections=200
         --o:max_documents=100
-      domain: ${OPENDESK_DOMAIN:-opendesk.example.com}
+      domain: ${OPENDESK_DOMAIN:-opendesk-sme.org}
       DONT_GEN_SSL_CERT: true
       username: ${COLLABORA_USERNAME:-admin}
       password: ${COLLABORA_PASSWORD:-CHANGEME_collabora}
@@ -87,7 +87,7 @@ services:
       - opendesk-net
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.collabora.rule=Host(`${COLLABORA_DOMAIN:-collabora.opendesk.example.com}`)"
+      - "traefik.http.routers.collabora.rule=Host(`${COLLABORA_DOMAIN:-collabora.opendesk-sme.org}`)"
       - "traefik.http.routers.collabora.tls=true"
       - "traefik.http.routers.collabora.tls.certresolver=letsencrypt"
       - "traefik.http.services.collabora.loadbalancer.server.port=9980"
