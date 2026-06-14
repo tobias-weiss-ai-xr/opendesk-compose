@@ -6,7 +6,7 @@ services:
   stalwart:
     image: stalwartlabs/stalwart:v0.16
     container_name: opendesk-stalwart
-    hostname: mail.${OPENDESK_DOMAIN:-opendesk.example.com}
+    hostname: mail.${OPENDESK_DOMAIN:-opendesk-sme.org}
     restart: unless-stopped
     ports:
       - "25:25"
@@ -15,7 +15,7 @@ services:
       - "993:993"
     environment:
       TZ: Europe/Berlin
-      STALWART_PUBLIC_URL: https://${MAIL_DOMAIN:-mail.opendesk.example.com}
+      STALWART_PUBLIC_URL: https://${MAIL_DOMAIN:-mail.opendesk-sme.org}
       STALWART_RECOVERY_ADMIN: admin:${STALWART_ADMIN_PASSWORD:-}
     volumes:
       - stalwart-etc:/etc/stalwart
@@ -31,7 +31,7 @@ services:
       - opendesk-net
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.stalwart.rule=Host(`${MAIL_DOMAIN:-mail.opendesk.example.com}`)"
+      - "traefik.http.routers.stalwart.rule=Host(`${MAIL_DOMAIN:-mail.opendesk-sme.org}`)"
       - "traefik.http.routers.stalwart.tls=true"
       - "traefik.http.routers.stalwart.tls.certresolver=letsencrypt"
       - "traefik.http.services.stalwart.loadbalancer.server.port=8080"

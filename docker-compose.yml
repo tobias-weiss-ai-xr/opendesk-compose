@@ -24,7 +24,7 @@ services:
       - "--entryPoints.web.http.redirections.entryPoint.to=websecure"
       - "--entryPoints.web.http.redirections.entryPoint.scheme=https"
       - "--entryPoints.websecure.http3=true"
-      - "--certificatesResolvers.letsencrypt.acme.email=${TRAEFIK_ACME_EMAIL:-admin@opendesk.example.com}"
+      - "--certificatesResolvers.letsencrypt.acme.email=${TRAEFIK_ACME_EMAIL:-admin@opendesk-sme.org}"
       - "--certificatesResolvers.letsencrypt.acme.storage=/etc/traefik/acme.json"
       - "--certificatesResolvers.letsencrypt.acme.httpChallenge.entryPoint=web"
       - "--api.dashboard=true"
@@ -41,7 +41,7 @@ services:
       - opendesk-net
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.dashboard.rule=Host(`traefik.${OPENDESK_DOMAIN:-opendesk.example.com}`)"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.${OPENDESK_DOMAIN:-opendesk-sme.org}`)"
       - "traefik.http.routers.dashboard.service=api@internal"
       - "traefik.http.routers.dashboard.middlewares=auth"
       - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_USERS:-admin:$$2y$$10$$CHANGEME}"
@@ -204,12 +204,12 @@ services:
     container_name: opendesk-portal
     restart: unless-stopped
     environment:
-      PORTAL_DOMAIN: ${PORTAL_DOMAIN:-portal.opendesk.example.com}
-      OPENDESK_DOMAIN: ${OPENDESK_DOMAIN:-opendesk.example.com}
-      OPENCLOUD_URL: https://${OPENCLOUD_DOMAIN:-cloud.opendesk.example.com}
-      MAIL_URL: https://${SOGO_DOMAIN:-webmail.opendesk.example.com}
-      KEYCLOAK_URL: https://${KEYCLOAK_DOMAIN:-auth.opendesk.example.com}/auth
-      COLLABORA_URL: https://${COLLABORA_DOMAIN:-collabora.opendesk.example.com}
+      PORTAL_DOMAIN: ${PORTAL_DOMAIN:-portal.opendesk-sme.org}
+      OPENDESK_DOMAIN: ${OPENDESK_DOMAIN:-opendesk-sme.org}
+      OPENCLOUD_URL: https://${OPENCLOUD_DOMAIN:-cloud.opendesk-sme.org}
+      MAIL_URL: https://${SOGO_DOMAIN:-webmail.opendesk-sme.org}
+      KEYCLOAK_URL: https://${KEYCLOAK_DOMAIN:-auth.opendesk-sme.org}/auth
+      COLLABORA_URL: https://${COLLABORA_DOMAIN:-collabora.opendesk-sme.org}
       RUST_LOG: ${LOG_LEVEL:-info}
     ports:
       - "127.0.0.1:8080:8080"
@@ -220,7 +220,7 @@ services:
       - opendesk-net
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.portal.rule=Host(`${PORTAL_DOMAIN:-portal.opendesk.example.com}`)"
+      - "traefik.http.routers.portal.rule=Host(`${PORTAL_DOMAIN:-portal.opendesk-sme.org}`)"
       - "traefik.http.routers.portal.tls=true"
       - "traefik.http.routers.portal.tls.certresolver=letsencrypt"
       - "traefik.http.services.portal.loadbalancer.server.port=8080"
