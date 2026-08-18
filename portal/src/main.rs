@@ -15,7 +15,7 @@ use tracing::{info, warn};
 struct AppConfig {
     opencloud_url: String,
     mail_url: String,
-    keycloak_url: String,
+    idp_url: String,
     collabora_url: String,
     portal_domain: String,
     opendesk_domain: String,
@@ -172,12 +172,11 @@ fn build_landing_page(config: &AppConfig) -> String {
 fn get_services(config: &AppConfig) -> Vec<Service> {
     let mut services = Vec::new();
 
-    // Only include Keycloak — always expected
-    if !config.keycloak_url.is_empty() {
+    if !config.idp_url.is_empty() {
         services.push(Service {
-            name: "Keycloak".into(),
-            description: "Single sign-on and identity management".into(),
-            url: config.keycloak_url.clone(),
+            name: "Identity".into(),
+            description: "Single sign-on and user management".into(),
+            url: config.idp_url.clone(),
         });
     }
 
@@ -276,7 +275,7 @@ fn load_config() -> AppConfig {
         opendesk_domain: load_env("OPENDESK_DOMAIN", "opendesk-sme.org"),
         opencloud_url: load_env("OPENCLOUD_URL", "https://cloud.opendesk-sme.org"),
         mail_url: load_env("MAIL_URL", ""),
-        keycloak_url: load_env("KEYCLOAK_URL", "https://auth.opendesk-sme.org"),
+        idp_url: load_env("IDP_URL", ""),
         collabora_url: load_env("COLLABORA_URL", ""),
     }
 }
