@@ -78,7 +78,8 @@ if [[ "$FORCE_ENV" == true ]] || [[ ! -f .env ]]; then
 # openDesk SME — Local Demo Configuration
 OPENDESK_DOMAIN=opendesk.local
 OPENCLOUD_DOMAIN=cloud.opendesk.local
-KEYCLOAK_DOMAIN=auth.opendesk.local
+ZITADEL_DOMAIN=auth.opendesk.local
+IDP_URL=https://"$ZITADEL_DOMAIN"
 PORTAL_DOMAIN=portal.opendesk.local
 MAIL_DOMAIN=mail.opendesk.local
 SOGO_DOMAIN=webmail.opendesk.local
@@ -86,11 +87,11 @@ COLLABORA_DOMAIN=collabora.opendesk.local
 
 # Random passwords
 POSTGRES_PASSWORD=$(pw)
-KEYCLOAK_DB_PASSWORD=$(pw)
+ZITADEL_DB_PASSWORD=$(pw)
 SOGO_DB_PASSWORD=$(pw)
 LDAP_ADMIN_PASSWORD=$(pw)
 LDAP_USER_PASSWORD=$(pw)
-KEYCLOAK_ADMIN_PASSWORD=$(pw)
+ZITADEL_ADMIN_PASSWORD=$(pw)
 OC_ADMIN_PASSWORD=$(pw)
 OC_OIDC_SECRET=$(pw)
 OC_S3_SECRET_KEY=$(pw)
@@ -113,7 +114,7 @@ info "Building and starting openDesk SME (demo mode)..."
 
 docker compose \
   -f docker-compose.yml \
-  -f idm/keycloak.yml \
+  -f idm/zitadel.yml \
   -f opencloud/opencloud.yml \
   -f profiles/demo.dev.yml \
   up -d --build
@@ -122,7 +123,7 @@ echo ""
 ok "openDesk SME Demo is running!"
 
 # ── Get admin password ────────────────────────
-ADMIN_PW=$(grep KEYCLOAK_ADMIN_PASSWORD .env | cut -d= -f2)
+ADMIN_PW=$(grep ZITADEL_ADMIN_PASSWORD .env | cut -d= -f2)
 OC_ADMIN=$(grep OC_ADMIN_PASSWORD .env | cut -d= -f2)
 TRAEFIK_HASH=$(grep TRAEFIK_USERS .env | cut -d= -f2-)
 TRAEFIK_PASS_DISPLAY="(see .env — TRAEFIK_USERS hash)"
@@ -151,6 +152,6 @@ echo -e "    Password: ${TRAEFIK_PASS_DISPLAY}"
 echo ""
 echo -e "${GREEN}───────────────────────────────────────────${NC}"
 echo ""
-info "To stop:   docker compose -f docker-compose.yml -f idm/keycloak.yml -f opencloud/opencloud.yml -f profiles/demo.dev.yml down"
+info "To stop:   docker compose -f docker-compose.yml -f idm/zitadel.yml -f opencloud/opencloud.yml -f profiles/demo.dev.yml down"
 info "To follow: docker compose logs -f"
 info "For public HTTPS demo, see scripts/demo-live.sh"

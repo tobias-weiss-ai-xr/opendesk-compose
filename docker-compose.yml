@@ -3,7 +3,7 @@
 # ═══════════════════════════════════════════════════════════════
 # Always runs: Traefik, PostgreSQL (+ PgBouncer), Redis, Memcached, Portal
 # Add features via COMPOSE_FILE:
-#   idm/keycloak.yml    → Keycloak + LDAP (IAM/SSO)
+#   idm/zitadel.yml  → Zitadel (IAM/SSO)
 #   opencloud/...yml    → OpenCloud (files/collaboration)
 #   mail/stalwart.yml   → Stalwart (mail server)
 #   mail/sogo.yml       → SOGo (webmail/groupware)
@@ -219,7 +219,7 @@ services:
       OPENDESK_DOMAIN: ${OPENDESK_DOMAIN:-opendesk-sme.org}
       OPENCLOUD_URL: https://${OPENCLOUD_DOMAIN:-cloud.opendesk-sme.org}
       MAIL_URL: ${MAIL_URL:-}
-      KEYCLOAK_URL: https://${KEYCLOAK_DOMAIN:-auth.opendesk-sme.org}
+      IDP_URL: https://${ZITADEL_DOMAIN:-auth.opendesk-sme.org}
       COLLABORA_URL: ${COLLABORA_URL:-}
       RUST_LOG: ${LOG_LEVEL:-info}
     depends_on:

@@ -28,9 +28,9 @@ services:
       OC_ADMIN_PASSWORD: ${OC_ADMIN_PASSWORD:-CHANGEME_oc_admin}
       OC_DOMAIN: ${OPENCLOUD_DOMAIN:-cloud.opendesk-sme.org}
       OC_URL: https://${OPENCLOUD_DOMAIN:-cloud.opendesk-sme.org}
-      OC_IDP_URL: https://${KEYCLOAK_DOMAIN:-auth.opendesk-sme.org}
-      OC_OIDC_ISSUER: https://${KEYCLOAK_DOMAIN:-auth.opendesk-sme.org}/realms/opendesk
-      OC_OIDC_CLIENT_ID: opencloud
+      OC_IDP_URL: https://${ZITADEL_DOMAIN:-auth.opendesk-sme.org}
+      OC_OIDC_ISSUER: https://${ZITADEL_DOMAIN:-auth.opendesk-sme.org}
+      OC_OIDC_CLIENT_ID: ${OC_OIDC_CLIENT_ID:-opencloud}
       OC_OIDC_CLIENT_SECRET: ${OC_OIDC_SECRET:-CHANGEME_oidc_secret}
       PROXY_ROLE_ASSIGNMENT_DRIVER: oidc
       STORAGE_USERS_DRIVER: decomposeds3
