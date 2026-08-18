@@ -89,6 +89,9 @@ PORTAL_DOMAIN=home.opendesk-sme.org
 KEYCLOAK_DOMAIN=auth.home.opendesk-sme.org
 OPENCLOUD_DOMAIN=cloud.home.opendesk-sme.org
 
+# ── LDAP ──
+LDAP_ROOT_DN=dc=opendesk-sme,dc=org
+
 # ── Database ──
 POSTGRES_PASSWORD=$(pw)
 KEYCLOAK_DB_PASSWORD=$(pw)
@@ -106,6 +109,10 @@ KEYCLOAK_ADMIN_PASSWORD=$(pw)
 OC_ADMIN_USERNAME=admin
 OC_ADMIN_PASSWORD=$(pw)
 OC_OIDC_SECRET=$(pw)
+
+# ── Portal (empty = hidden from landing page) ──
+MAIL_URL=
+COLLABORA_URL=
 
 # ── Traefik ──
 TRAEFIK_ACME_EMAIL=${ACME_EMAIL}
@@ -211,6 +218,7 @@ wait_for_healthy() {
 wait_for_healthy "opendesk-postgres" 60
 wait_for_healthy "opendesk-redis"    30
 wait_for_healthy "opendesk-keycloak"  120 || true
+wait_for_healthy "opendesk-opencloud"  120 || true
 
 # ── Summary ────────────────────────────────────────
 ADMIN_PW=$(grep KEYCLOAK_ADMIN_PASSWORD .env | cut -d= -f2)

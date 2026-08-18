@@ -1,22 +1,19 @@
 #!/usr/bin/env bash
 # ── openDesk SME — Start ────────────────────
+# Starts all configured services using COMPOSE_FILE.
+# Defaults to core + keycloak + opencloud.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$DIR"
 
-# Default: core + keycloak + opencloud
-COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml:idm/keycloak.yml:opencloud/opencloud.yml}"
+DEFAULT_FILES="docker-compose.yml:idm/keycloak.yml:opencloud/opencloud.yml"
+COMPOSE_FILE="${COMPOSE_FILE:-$DEFAULT_FILES}"
 
 echo "🚀 Starting openDesk SME..."
 echo "   Compose file(s): ${COMPOSE_FILE}"
 
-COMPOSE_FILE="$COMPOSE_FILE" docker compose up -d
+docker compose up -d
 
 echo ""
 echo "✅ openDesk SME is starting up."
-echo "   Endpoints:"
-echo "   - Portal:       https://portal.${OPENDESK_DOMAIN:-opendesk-sme.org}"
-echo "   - Keycloak:     https://${KEYCLOAK_DOMAIN:-auth.opendesk-sme.org}"
-echo "   - Traefik:      https://traefik.${OPENDESK_DOMAIN:-opendesk-sme.org}"
-echo "   - OpenCloud:    https://${OPENCLOUD_DOMAIN:-cloud.opendesk-sme.org}"
