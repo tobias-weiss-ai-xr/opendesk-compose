@@ -269,7 +269,7 @@ fn load_config() -> AppConfig {
         opendesk_domain: load_env("OPENDESK_DOMAIN", "opendesk-sme.org"),
         opencloud_url: load_env("OPENCLOUD_URL", "https://cloud.opendesk-sme.org"),
         mail_url: load_env("MAIL_URL", ""),
-        keycloak_url: load_env("KEYCLOAK_URL", "https://auth.opendesk-sme.org/auth"),
+        keycloak_url: load_env("KEYCLOAK_URL", "https://auth.opendesk-sme.org"),
         collabora_url: load_env("COLLABORA_URL", ""),
     }
 }
