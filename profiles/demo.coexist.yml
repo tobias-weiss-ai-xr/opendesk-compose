@@ -70,9 +70,9 @@ services:
       - "traefik.http.routers.opendesk-zitadel.entrypoints=${EXISTING_TRAEFIK_HTTPS:-websecure}"
       - "traefik.http.services.opendesk-zitadel.loadbalancer.server.port=8080"
 
-  # ── LDAP ───────────────────────────────────
-  ldap:
-    networks: []
+  # ── LDAP (legacy, not used with Zitadel) ──
+  # ldap:
+  #   networks: []
 
   # ── OpenCloud ──────────────────────────────
   opencloud:
