@@ -1,0 +1,74 @@
+# =============================================================================
+# Stalwart Mail Configuration — openDesk Compose
+# Minimal working config for SMTP/IMAP behind Traefik reverse proxy.
+# TLS certificates are optional (Stalwart auto-generates self-signed).
+# For production: mount real certs or use Let's Encrypt via Traefik.
+# =============================================================================
+
+# --- Server ---
+server.hostname = "${STALWART_HOSTNAME:-mail.localhost}"
+server.listener.smtp.bind = "0.0.0.0:25"
+server.listener.smtp.protocol = "smtp"
+
+server.listener.submission.bind = "0.0.0.0:587"
+server.listener.submission.protocol = "smtp"
+
+server.listener.submissions.bind = "0.0.0.0:465"
+server.listener.submissions.protocol = "smtp"
+server.listener.submissions.tls.implicit = true
+
+server.listener.imap.bind = "0.0.0.0:143"
+server.listener.imap.protocol = "imap"
+
+server.listener.imaptls.bind = "0.0.0.0:993"
+server.listener.imaptls.protocol = "imap"
+server.listener.imaptls.tls.implicit = true
+
+server.listener.pop3.bind = "0.0.0.0:110"
+server.listener.pop3.protocol = "pop3"
+
+server.listener.pop3s.bind = "0.0.0.0:995"
+server.listener.pop3s.protocol = "pop3"
+server.listener.pop3s.tls.implicit = true
+
+server.listener.sieve.bind = "0.0.0.0:4190"
+server.listener.sieve.protocol = "managesieve"
+
+# HTTP management API (behind Traefik on port 8082 → 8080)
+server.listener.http.bind = "0.0.0.0:8080"
+server.listener.http.protocol = "http"
+
+# --- Storage ---
+storage.data = "rocksdb"
+storage.fts = "rocksdb"
+storage.blob = "rocksdb"
+storage.lookup = "rocksdb"
+storage.directory = "internal"
+
+store.rocksdb.type = "rocksdb"
+store.rocksdb.path = "/opt/stalwart/data"
+store.rocksdb.compression = "lz4"
+
+directory.internal.type = "internal"
+directory.internal.store = "rocksdb"
+
+# --- Logging ---
+tracer.log.type = "log"
+tracer.log.level = "info"
+tracer.log.path = "/opt/stalwart/logs"
+tracer.log.prefix = "stalwart.log"
+tracer.log.rotate = "daily"
+tracer.log.ansi = false
+tracer.log.enable = true
+
+# --- TLS (auto-generate self-signed for MVP) ---
+# For production: replace with Let's Encrypt certificates
+certificate.default.cert = "/opt/stalwart/etc/tls.crt"
+certificate.default.private-key = "/opt/stalwart/etc/tls.key"
+
+# --- Authentication ---
+# Fallback admin for initial setup (change password!)
+# Default: admin / admin  (bcrypt hash of "admin")
+# IMPORTANT: Change this before production use!
+authentication.fallback-admin.user = "admin"
+authentication.fallback-admin.secret = "$6$03RjBA2xHw5oMQna$JE.QXoXVtyYMloapmDa0S7/LH9CaSShrG5b27nqF4odM0hzzgkd.cx7pRswyIo4W1dqQzbdveZKgpgm88zo.c0"

@@ -1,0 +1,901 @@
+# openDesk Docker Compose — SME Deployment
+#
+# Uses Zendis (openDesk) container images from registry.opencode.de
+# plus SME-focused services (Invoice Ninja, Paperless-ngx).
+# All services accessible via Traefik reverse proxy on HTTPS.
+#
+# Zendis images require authentication:
+#   docker login registry.opencode.de -u $OD_PRIVATE_REGISTRY_USERNAME -p $OD_PRIVATE_REGISTRY_PASSWORD
+#
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  PROFILE-BASED ARCHITECTURE                                                ║
+# ║                                                                              ║
+# ║  CORE (always on — every SME needs these):                                 ║
+# ║    Traefik | PostgreSQL | Casdoor (SSO) | Redis | Stalwart | SOGo |        ║
+# ║    Invoice Ninja | Paperless-ngx | Paperless-Gotenberg                       ║
+# ║    = 9 containers, ~2.3 GB RAM                                              ║
+# ║                                                                              ║
+# ║  OPTIONAL PROFILES:                                                          ║
+# ║    --profile office   OpenCloud (file sharing, project storage)             ║
+# ║    --profile chat     Synapse (Matrix chat for remote teams)                 ║
+# ║    --profile collab   CryptPad (collaborative document editing)              ║
+# ║    --profile element  Element-Web (Matrix web client)                        ║
+# ║    --profile notes    Notes/Impress (3 containers + MinIO)                   ║
+# ║    --profile tika     Paperless-Tika (enhanced OCR for scanned docs)          ║
+# ║    --profile memcached Memcached cache layer                                 ║
+# ║                                                                              ║
+# ║  TIER-TO-PROFILE MAPPING (Makefile):                                         ║
+# ║    make up PROFILE=soho     → core only (9 containers)                      ║
+# ║    make up PROFILE=small    → core + office + tika (11 containers)           ║
+# ║    make up PROFILE=medium   → core + office + chat + collab + element + tika  ║
+# ║                                                                              ║
+# ║  VPS TIERS:                                                                   ║
+# ║    soho:   4 cores / 8 GB RAM / 120 GB SSD   (1-5 users, solo SME)         ║
+# ║    small:  8 cores / 24 GB RAM / 480 GB SSD  (10-25 users, team SME)        ║
+# ║    medium: 16 cores / 48 GB RAM / 960 GB SSD  (40-60 users, larger SME)     ║
+# ║                                                                              ║
+# ║  SSO: Casdoor provides OIDC/OAuth2 for ALL services.                        ║
+# ║  When a profile is enabled, its services authenticate via Casdoor SSO.       ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+#
+# Components:
+#   TRAEFIK | POSTGRESQL | CASDOOR | REDIS ★ | [MEMCACHED ★] |
+#   [OPENCLOUD] | [SYNAPSE ★] | [ELEMENT ★] | [CRYPTPAD ★] | [NOTES ★] |
+#   STALWART | SOGO | INVOICE NINJA | PAPERLESS-NGX | PAPERLESS-GOTENBERG | [PAPERLESS-TIKA]
+#
+# ★ = Zendis image from registry.opencode.de
+#
+# Databases (single PostgreSQL): casdoor, synapse, opencloud, notes, sogo,
+#                                 paperless, invoiceninja (7 DBs)
+#
+# Usage:
+#   1. docker login registry.opencode.de
+#   2. cp .env.example .env.production && vi .env.production
+#   3. make up              # starts core (soho)
+#   3. make up PROFILE=small   # starts core + office + tika
+#   4. make up PROFILE=medium  # starts core + office + chat + collab + element + tika
+
+networks:
+  traefik-frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+
+volumes:
+  traefik-acme:
+  pgdata:
+  casdoor_data:
+  opencloud_data:
+  notes_data:
+  cryptpad_data:
+  cryptpad_blob:
+  synapse_data:
+  stalwart_data:
+  sogo_data:
+  minio_data:
+  redis_data:
+  paperless_data:
+  paperless_media:
+  paperless_export:
+  invoiceninja_data:
+  invoiceninja_public:
+  invoiceninja_storage:
+
+services:
+  # ==========================================================================
+  # INFRASTRUCTURE
+  # ==========================================================================
+
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-acme:/acme
+    networks:
+      - traefik-frontend
+    command:
+      - "--api.insecure=true"
+      - "--ping=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=traefik-frontend"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.traefik.address=:8080"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@${DOMAIN:-example.com}}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "-O", "/dev/null", "http://localhost:8080/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+        reservations:
+          memory: 32M
+
+  postgres:
+    image: postgres:15.13-alpine3.20
+    container_name: postgres
+    restart: unless-stopped
+    user: "70:70"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # SOHO tuning: 4 cores, ~700MB for PG, 10 total accounts across 7 DBs
+      POSTGRES_SHARED_BUFFERS: "128MB"
+      POSTGRES_EFFECTIVE_CACHE_SIZE: "384MB"
+      POSTGRES_WORK_MEM: "2MB"
+      POSTGRES_MAINTENANCE_WORK_MEM: "32MB"
+      POSTGRES_MAX_CONNECTIONS: "80"
+      POSTGRES_RANDOM_PAGE_COST: "1.1"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 768M
+        reservations:
+          memory: 128M
+
+  # ==========================================================================
+  # IAM — Casdoor (OIDC/OAuth2 SSO — replaces Keycloak)
+  # ==========================================================================
+  # Casdoor: 128 MB (Go) vs Keycloak: 900 MB (Java JVM)
+  # All OIDC-capable services authenticate centrally through Casdoor.
+  # PostgreSQL backend — shares the same DB server as all other services.
+
+  casdoor:
+    image: casbin/casdoor-all-in-one:latest
+    container_name: casdoor
+    restart: unless-stopped
+    entrypoint: ["/bin/sh"]
+    command: ["-c", "envsubst < /opt/casdoor/conf/app.conf.template > /opt/casdoor/conf/app.conf && /opt/casdoor/casdoor"]
+    environment:
+      CASDOOR_DB_PASSWORD: ${CASDOOR_DB_PASSWORD:-changeme}
+      CASDOOR_ADMIN_PASSWORD: ${CASDOOR_ADMIN_PASSWORD:-changeme}
+      # Casdoor reads these from the generated app.conf
+    volumes:
+      - casdoor_data:/opt/casdoor/data
+      - ./casdoor-config:/opt/casdoor/conf
+    networks:
+      - backend
+      - traefik-frontend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-frontend"
+      - "traefik.http.routers.casdoor.rule=Host(auth.${DOMAIN})"
+      - "traefik.http.routers.casdoor.entrypoints=websecure"
+      - "traefik.http.routers.casdoor.tls=true"
+      - "traefik.http.routers.casdoor.tls.certresolver=letsencrypt"
+      - "traefik.http.services.casdoor.loadbalancer.server.port=8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/ || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+        reservations:
+          memory: 32M
+
+  # ==========================================================================
+  # CACHING — Redis ★
+  # ==========================================================================
+
+  redis:
+    image: registry.opencode.de/bmi/opendesk/components/community/images-mirror/redis:7.4.3-debian-12-r0
+    container_name: redis
+    restart: unless-stopped
+    # SOHO: 64M max, no persistence (volatile cache is fine for 5 users)
+    command: >
+      redis-server
+      --maxmemory 64mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+        reservations:
+          memory: 16M
+
+  # ==========================================================================
+  # EMAIL — Stalwart Mail
+  # ==========================================================================
+
+  stalwart-mail:
+    image: stalwartlabs/stalwart:latest
+    container_name: stalwart-mail
+    restart: unless-stopped
+    environment:
+      STALWART_HOSTNAME: ${EMAIL_DOMAIN:-mail.${DOMAIN}}
+    volumes:
+      - stalwart_data:/opt/stalwart
+      - ./stalwart-config/config.toml:/opt/stalwart/etc/config.toml:ro
+    networks:
+      - backend
+    ports:
+      - "25:25"
+      - "587:587"
+      - "465:465"
+      - "143:143"
+      - "993:993"
+      - "110:110"
+      - "995:995"
+      - "4190:4190"
+      - "8082:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+        reservations:
+          memory: 32M
+
+  # ==========================================================================
+  # WEBMAIL — SOGo (OIDC via Casdoor)
+  # ==========================================================================
+
+  sogo:
+    image: sonroyaalmerol/docker-sogo:5.10.0
+    container_name: sogo
+    restart: unless-stopped
+    environment:
+      SOGO_IMAP_SERVER: stalwart-mail
+      SOGO_SIEVE_PORT: 4190
+      SOGO_SMTP_SERVER: stalwart-mail
+      SOGO_SMTP_PORT: 25
+      SOGO_DOMAIN: ${EMAIL_DOMAIN:-mail.${DOMAIN}}
+      SOGO_ADMIN_USER: ${SOGO_ADMIN_USER:-admin}
+      SOGO_ADMIN_PASSWORD: ${SOGO_ADMIN_PASSWORD:-changeme}
+      # OIDC via Casdoor — SSO for webmail + calendar + contacts
+      SOGO_OAUTH2_ISSUER: https://auth.${DOMAIN}
+      SOGO_OAUTH2_CLIENT_ID: sogo
+      SOGO_OAUTH2_CLIENT_SECRET: ${SOGO_OAUTH2_CLIENT_SECRET:-changeme}
+      SOGO_DB_HOST: postgres
+      SOGO_DB_PORT: 5432
+      SOGO_DB_NAME: sogo_db
+      SOGO_DB_USER: sogo_user
+      SOGO_DB_PASSWORD: ${SOGO_DB_PASSWORD:-changeme}
+    volumes:
+      - sogo_data:/var/lib/sogo
+    networks:
+      - backend
+      - traefik-frontend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      stalwart-mail:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-frontend"
+      - "traefik.http.routers.webmail.rule=Host(webmail.${DOMAIN})"
+      - "traefik.http.routers.webmail.entrypoints=websecure"
+      - "traefik.http.routers.webmail.tls=true"
+      - "traefik.http.routers.webmail.tls.certresolver=letsencrypt"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "-O", "/dev/null", "http://localhost:20000/SOGo.index"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+        reservations:
+          memory: 32M
+
+  # ==========================================================================
+  # INVOICING — Invoice Ninja
+  # ==========================================================================
+
+  invoiceninja:
+    image: invoiceninja/invoiceninja:5
+    container_name: invoiceninja
+    restart: unless-stopped
+    environment:
+      APP_URL: "https://invoices.${DOMAIN:-localhost}"
+      APP_ENV: production
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_DATABASE: invoiceninja_db
+      DB_USERNAME: invoiceninja_user
+      DB_PASSWORD: ${INVOICENINJA_DB_PASSWORD:-changeme}
+      DB_TYPE: pgsql
+      MAIL_MAILER: smtp
+      MAIL_HOST: stalwart-mail
+      MAIL_PORT: "25"
+      MAIL_ENCRYPTION: ""
+      # Multi-company / branding
+      REQUIRE_CONFIRMATION: "false"
+      SET_UNCONFIRMED: "true"
+      SELF_UPDATE: "false"
+    volumes:
+      - invoiceninja_public:/var/www/app/public
+      - invoiceninja_storage:/var/www/app/storage
+    networks:
+      - backend
+      - traefik-frontend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-frontend"
+      - "traefik.http.routers.invoices.rule=Host(invoices.${DOMAIN})"
+      - "traefik.http.routers.invoices.entrypoints=websecure"
+      - "traefik.http.routers.invoices.tls=true"
+      - "traefik.http.routers.invoices.tls.certresolver=letsencrypt"
+      - "traefik.http.services.invoices.loadbalancer.server.port=9000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 192M
+        reservations:
+          memory: 32M
+
+  # ==========================================================================
+  # DOCUMENT MANAGEMENT — Paperless-ngx + Gotenberg
+  # ==========================================================================
+
+  paperless-ngx:
+    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    container_name: paperless-ngx
+    restart: unless-stopped
+    environment:
+      PAPERLESS_REDIS: redis://redis:6379/2
+      PAPERLESS_DBHOST: postgres
+      PAPERLESS_DBPORT: 5432
+      PAPERLESS_DBNAME: paperless_db
+      PAPERLESS_DBUSER: paperless_user
+      PAPERLESS_DBPASS: ${PAPERLESS_DB_PASSWORD:-changeme}
+      PAPERLESS_URL: https://paperless.${DOMAIN:-localhost}
+      PAPERLESS_SECRET_KEY: ${PAPERLESS_SECRET_KEY:-changeme-generate-64-chars}
+      PAPERLESS_TIME_ZONE: ${TZ:-Europe/Berlin}
+      PAPERLESS_OCR_LANGUAGE: deu+eng
+      # SOHO: Tesseract only — no Tika (saves ~512M RAM)
+      # Small/Medium overrides set PAPERLESS_OCR_MODE=tesseract_and_tika
+      PAPERLESS_OCR_MODE: tesseract
+      PAPERLESS_OCR_CLEAN: clean
+      # SOHO: 1 thread to limit RAM usage during OCR
+      PAPERLESS_THREADS: "1"
+      PAPERLESS_WEBSERVER_WORKERS: "1"
+      PAPERLESS_TASK_WORKERS: "1"
+      PAPERLESS_CONSUMER_POLLING: "30"
+      PAPERLESS_FILENAME_FORMAT: "{created_year}/{created_month}/{created_day}/{correspondent}/{title}"
+      PAPERLESS_CONVERT_MEMORY_LIMIT: 256
+      PAPERLESS_GOTENBERG_ENDPOINT: http://paperless-gotenberg:3000
+      # Tika only enabled via profile or small/medium override
+      # PAPERLESS_TIKA_ENDPOINT: http://paperless-tika:9998
+    volumes:
+      - paperless_data:/usr/src/paperless/data
+      - paperless_media:/usr/src/paperless/media
+      - paperless_export:/usr/src/paperless/export
+      - ./paperless-consume:/consume:ro
+    networks:
+      - backend
+      - traefik-frontend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      paperless-gotenberg:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-frontend"
+      - "traefik.http.routers.paperless.rule=Host(paperless.${DOMAIN})"
+      - "traefik.http.routers.paperless.entrypoints=websecure"
+      - "traefik.http.routers.paperless.tls=true"
+      - "traefik.http.routers.paperless.tls.certresolver=letsencrypt"
+      - "traefik.http.services.paperless.loadbalancer.server.port=8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 384M
+        reservations:
+          memory: 64M
+
+  paperless-gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: paperless-gotenberg
+    restart: unless-stopped
+    command:
+      - "gotenberg"
+      - "--chromium-rpc-max-page-size=100"
+      - "--chromium-rpc-max-rpc-timeout=30s"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "-O", "/dev/null", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: 96M
+        reservations:
+          memory: 16M
+
+  # ==========================================================================
+  # --profile office — File Sharing / Project Storage (OpenCloud)
+  # ==========================================================================
+  # OpenCloud with OIDC via Casdoor for SSO.
+  # 5/6 use cases need file sharing (only tiny restaurants don't).
+
+  opencloud:
+    image: opencloudeu/opencloud:latest
+    container_name: opencloud
+    restart: unless-stopped
+    profiles: ["office"]
+    entrypoint: ["/bin/sh"]
+    command: ["-c", "opencloud init || true; opencloud server"]
+    environment:
+      OC_CONFIG_DIR: /etc/opencloud
+      OC_INSECURE: "true"
+      OC_URL: https://opencloud.${DOMAIN:-localhost}
+      OC_LOG_LEVEL: info
+    volumes:
+      - opencloud_data:/var/lib/opencloud
+      - ./opencloud-config:/etc/opencloud
+    networks:
+      - backend
+      - traefik-frontend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-frontend"
+      - "traefik.http.routers.opencloud.rule=Host(opencloud.${DOMAIN})"
+      - "traefik.http.routers.opencloud.entrypoints=websecure"
+      - "traefik.http.routers.opencloud.tls=true"
+      - "traefik.http.routers.opencloud.tls.certresolver=letsencrypt"
+      - "traefik.http.services.opencloud.loadbalancer.server.port=9200"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "-O", "/dev/null", "http://localhost:9200/healthz"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          memory: 64M
+
+  # ==========================================================================
+  # --profile chat — Matrix Chat (Synapse)
+  # ==========================================================================
+  # Only needed for remote teams (12+ users). WhatsApp/Signal dominate
+  # for smaller SMEs. OIDC login via Casdoor configured in homeserver.yaml.
+
+  synapse:
+    image: registry.opencode.de/bmi/opendesk/components/supplier/element/images-mirror/synapse:v1.144.0
+    container_name: synapse
+    restart: unless-stopped
+    profiles: ["chat"]
+    environment:
+      DOMAIN: ${DOMAIN}
+      SYNAPSE_SERVER_NAME: matrix.${DOMAIN}
+      SYNAPSE_REPORT_STATS: "no"
+      POSTGRES_USER: synapse_user
+      POSTGRES_PASSWORD: ${SYNAPSE_DB_PASSWORD:-changeme}
+      POSTGRES_DB: synapse_db
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+    volumes:
+      - synapse_data:/data
+      - ./scripts/synapse-setup.sh:/entrypoint-setup.sh:ro
+    networks:
+      - backend
+      - traefik-frontend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/sh"]
+    command: ["-c", "sh /entrypoint-setup.sh && exec /usr/local/bin/python -m synapse.app.homeserver --config-path /data/homeserver.yaml --daemonize=false"]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-frontend"
+      - "traefik.http.routers.matrix.rule=Host(matrix.${DOMAIN})"
+      - "traefik.http.routers.matrix.entrypoints=websecure"
+      - "traefik.http.routers.matrix.tls=true"
+      - "traefik.http.routers.matrix.tls.certresolver=letsencrypt"
+      - "traefik.http.services.matrix.loadbalancer.server.port=8008"
+    healthcheck:
+      test: ["CMD", "curl", "-fS", "http://localhost:8008/_matrix/federation/v1/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 384M
+        reservations:
+          memory: 64M
+
+  # ==========================================================================
+  # --profile collab — Collaborative Document Editing (CryptPad)
+  # ==========================================================================
+  # Needed for collaborative meeting notes, specs, checklists.
+  # Used by 12+ person teams (farbwert, Schreiber IT in our use cases).
+
+  cryptpad:
+    image: registry.opencode.de/bmi/opendesk/components/platform-development/images/cryptpad:version-2025.9.0
+    container_name: cryptpad
+    restart: unless-stopped
+    profiles: ["collab"]
+    environment:
+      DOMAIN: ${DOMAIN}
+      CPAD_HTTP_UNSAFE: "http://cryptpad:3000"
+      CPAD_HTTP_SAFE: "https://pad.${DOMAIN:-localhost}"
+      CPAD_ADMIN_EMAIL: ${CRYPTPAD_ADMIN_EMAIL:-admin@${DOMAIN:-localhost}}
+      CPAD_CONF: /cryptpad/config/config.js
+      CPAD_MAIN_DOMAIN: "http://cryptpad:3000"
+      CPAD_SANDBOX_DOMAIN: "http://cryptpad:3000"
+    volumes:
+      - cryptpad_data:/cryptpad/data
+      - cryptpad_blob:/cryptpad/blob
+      - ./cryptpad-config/config.js:/cryptpad/config/config.js:ro
+    networks:
+      - backend
+      - traefik-frontend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-frontend"
+      - "traefik.http.routers.pad.rule=Host(pad.${DOMAIN})"
+      - "traefik.http.routers.pad.entrypoints=websecure"
+      - "traefik.http.routers.pad.tls=true"
+      - "traefik.http.routers.pad.tls.certresolver=letsencrypt"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "-O", "/dev/null", "http://localhost:3000/"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+        reservations:
+          memory: 32M
+
+  # ==========================================================================
+  # --profile element — Matrix Web Client (Element-Web)
+  # ==========================================================================
+  # Optional: some users prefer native clients (FluffyChat, Nheko, Element Desktop).
+  # Kept separate from chat profile so users can choose their client.
+
+  element-web:
+    image: registry.opencode.de/bmi/opendesk/components/supplier/element/images/opendesk-element-web:v1.12.6
+    container_name: element-web
+    restart: unless-stopped
+    profiles: ["element"]
+    environment:
+      ELEMENT_DEFAULT_SERVER_URL: https://matrix.${DOMAIN}
+    networks:
+      - traefik-frontend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-frontend"
+      - "traefik.http.routers.element.rule=Host(element.${DOMAIN})"
+      - "traefik.http.routers.element.entrypoints=websecure"
+      - "traefik.http.routers.element.tls=true"
+      - "traefik.http.routers.element.tls.certresolver=letsencrypt"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "-O", "/dev/null", "http://localhost:8080/"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: 48M
+        reservations:
+          memory: 8M
+
+  # ==========================================================================
+  # --profile notes — Collaborative Notes (Impress, 3 containers + MinIO)
+  # ==========================================================================
+  # Notes/Impress for structured collaborative document editing.
+  # OIDC via Casdoor SSO. MinIO only used by Notes for S3 media storage.
+  # NOTE: None of our 6 SME use cases needed Notes. Kept for flexibility.
+
+  notes-backend:
+    image: registry.opencode.de/bmi/opendesk/components/platform-development/images/opendesk-notes:1.14.0-docs-v4.4.0-backend
+    container_name: notes-backend
+    restart: unless-stopped
+    profiles: ["notes"]
+    environment:
+      DJANGO_SETTINGS_MODULE: impress.settings.Production
+      DJANGO_SECRET_KEY: ${NOTES_DJANGO_SECRET_KEY:-changeme-generate-random-key}
+      ALLOWED_HOSTS: "notes.${DOMAIN:-localhost},notes-backend"
+      DATA_DIR: /data
+      DB_ENGINE: django.db.backends.postgresql
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: notes_db
+      DB_USER: notes_user
+      DB_PASSWORD: ${NOTES_DB_PASSWORD:-changeme}
+      REDIS_URL: redis://redis:6379/1
+      # OIDC via Casdoor SSO (replaces Keycloak endpoints)
+      OIDC_RP_CLIENT_ID: "opendesk-notes"
+      OIDC_RP_CLIENT_SECRET: ${NOTES_OIDC_CLIENT_SECRET:-changeme}
+      OIDC_OP_JWKS_ENDPOINT: "https://auth.${DOMAIN:-localhost}/.well-known/openid-configuration/jwks"
+      OIDC_OP_AUTHORIZATION_ENDPOINT: "https://auth.${DOMAIN:-localhost}/authorize/oauth2"
+      OIDC_OP_TOKEN_ENDPOINT: "https://auth.${DOMAIN:-localhost}/oauth/token"
+      OIDC_OP_USER_ENDPOINT: "https://auth.${DOMAIN:-localhost}/oauth/userinfo"
+      OIDC_OP_LOGOUT_ENDPOINT: "https://auth.${DOMAIN:-localhost}/oauth/logout"
+      OIDC_RP_SCOPES: "openid opendesk-notes-scope"
+      OIDC_CREATE_USER: "true"
+      OIDC_STORE_ID_TOKEN: "true"
+      OIDC_REDIRECT_REQUIRE_HTTPS: "false"
+      LOGIN_REDIRECT_URL: "https://notes.${DOMAIN:-localhost}"
+      LOGIN_REDIRECT_URL_FAILURE: "https://auth.${DOMAIN:-localhost}"
+      LOGOUT_REDIRECT_URL: "https://auth.${DOMAIN:-localhost}"
+      OIDC_REDIRECT_ALLOWED_HOSTS: "https://notes.${DOMAIN:-localhost}/*"
+      USER_OIDC_ESSENTIAL_CLAIMS: "email"
+      OIDC_USERINFO_FULLNAME_FIELDS: "given_name,family_name"
+      OIDC_USERINFO_SHORTNAME_FIELD: "given_name"
+      COLLABORATION_API_URL: "https://notes.${DOMAIN:-localhost}/collaboration/api/"
+      COLLABORATION_WS_URL: "wss://notes.${DOMAIN:-localhost}/collaboration/ws/"
+      COLLABORATION_SERVER_SECRET: ${NOTES_COLLABORATION_SECRET:-changeme}
+      Y_PROVIDER_API_BASE_URL: http://notes-y-provider:1234
+      Y_PROVIDER_API_KEY: ${NOTES_COLLABORATION_SECRET:-changeme}
+      AWS_S3_ENDPOINT_URL: "http://minio:9000"
+      AWS_S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      AWS_STORAGE_BUCKET_NAME: notes-media
+      FRONTEND_THEME: "openDesk"
+      FRONTEND_HOMEPAGE_FEATURE_ENABLED: "False"
+      FRONTEND_FOOTER_FEATURE_ENABLED: "False"
+      SITE_DOMAIN: "notes.${DOMAIN:-localhost}"
+      SITE_NAME: "openDesk Notes"
+    volumes:
+      - notes_data:/data
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      notes-y-provider:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3010/api/v1.0/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.35"
+          memory: 256M
+        reservations:
+          memory: 32M
+
+  notes-frontend:
+    image: registry.opencode.de/bmi/opendesk/components/platform-development/images/opendesk-notes:1.14.0-docs-v4.4.0-frontend
+    container_name: notes-frontend
+    restart: unless-stopped
+    profiles: ["notes"]
+    environment:
+      NOTES_BACKEND_URL: http://notes-backend:3010
+      NOTES_Y_PROVIDER_URL: http://notes-y-provider:1234
+    networks:
+      - backend
+      - traefik-frontend
+    depends_on:
+      notes-backend:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-frontend"
+      - "traefik.http.routers.notes.rule=Host(notes.${DOMAIN})"
+      - "traefik.http.routers.notes.entrypoints=websecure"
+      - "traefik.http.routers.notes.tls=true"
+      - "traefik.http.routers.notes.tls.certresolver=letsencrypt"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "-O", "/dev/null", "http://localhost:80/"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: 64M
+        reservations:
+          memory: 8M
+
+  notes-y-provider:
+    image: lasuite/impress-y-provider:v4.4.0
+    container_name: notes-y-provider
+    restart: unless-stopped
+    profiles: ["notes"]
+    environment:
+      Y_PROVIDER_API_KEY: ${NOTES_COLLABORATION_SECRET:-changeme}
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "-O", "/dev/null", "http://localhost:1234/"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.15"
+          memory: 64M
+        reservations:
+          memory: 16M
+
+  # MinIO: only used by Notes for S3 media storage.
+  # Moved from core to notes profile — OpenCloud/Paperless/IN use local storage.
+  minio:
+    image: registry.opencode.de/bmi/opendesk/components/community/images-mirror/minio:2025.4.22-debian-12-r1
+    container_name: minio
+    restart: unless-stopped
+    profiles: ["notes"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    networks:
+      - backend
+      - traefik-frontend
+    command: server /data --console-address ":9001"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-frontend"
+      - "traefik.http.routers.minio.rule=Host(objectstore.${DOMAIN})"
+      - "traefik.http.routers.minio.entrypoints=websecure"
+      - "traefik.http.routers.minio.tls=true"
+      - "traefik.http.routers.minio.tls.certresolver=letsencrypt"
+      - "traefik.http.services.minio.loadbalancer.server.port=9000"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+        reservations:
+          memory: 32M
+
+  # ==========================================================================
+  # --profile tika — Enhanced OCR (Paperless-Tika)
+  # ==========================================================================
+  # Java-based OCR fallback for scanned PDFs, handwriting, complex layouts.
+  # Auto-enabled for small/medium tiers via Makefile.
+  # SOHO uses Tesseract-only OCR (saves 512 MB RAM).
+
+  paperless-tika:
+    image: apache/tika-server-full:2.9
+    container_name: paperless-tika
+    restart: unless-stopped
+    profiles: ["tika"]
+    environment:
+      TIKA_MEMORY_LIMIT: 512m
+      JAVA_TOOL_OPTIONS: >-
+        -XX:MaxRAMPercentage=75.0
+        -XX:+UseG1GC
+        -XX:MaxGCPauseMillis=200
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9998/tika || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  # ==========================================================================
+  # --profile memcached — Cache Layer
+  # ==========================================================================
+  # Optional additional cache for larger deployments.
+  # Most SMEs don't need this — Redis is sufficient.
+
+  memcached:
+    image: registry.opencode.de/bmi/opendesk/components/community/images-mirror/memcached:1.6.38-debian-12-r3
+    container_name: memcached
+    restart: unless-stopped
+    profiles: ["memcached"]
+    environment:
+      MEMCACHED_CACHE_SIZE: "64"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "memcached-tool", "localhost:11211", "stats"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: 64M
+        reservations:
+          memory: 8M

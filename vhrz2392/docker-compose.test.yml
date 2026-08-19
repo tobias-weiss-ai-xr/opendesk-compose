@@ -1,0 +1,36 @@
+# openDesk Compose — Test override for vhrz2392
+# Fixes port conflicts with existing test containers and disables Let's Encrypt (internal network)
+
+services:
+  traefik:
+    ports:
+      # Remap dashboard: 8080 conflicts with event_calendar_caddy
+      - "9092:8080"
+    command:
+      - "--api.insecure=true"
+      - "--ping=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=traefik-frontend"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.traefik.address=:9092"
+      # Use self-signed certs (Let's Encrypt won't work on internal 172.25.x.x)
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@${DOMAIN:-example.com}}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+
+  redis:
+    # Use public image — no registry.opencode.de credentials available
+    image: redis:7-alpine
+    command: >
+      redis-server
+      --maxmemory 64mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+
+  stalwart-mail:
+    ports:
+      # Remap admin UI: 8082 conflicts with existing stalwart-webui
+      - "8084:8080"
