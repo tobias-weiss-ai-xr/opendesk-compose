@@ -53,8 +53,8 @@ the following notice:
 Organizations with more than 50 users (Medium and Enterprise tiers)
 require a **Commercial License**, available at:
 
-- [[REDACTED]](https://[REDACTED])
 - [graphwiz.ai](https://graphwiz.ai)
+- [hello@opendesk-sme.org](mailto:hello@opendesk-sme.org)
 
 See the [Enterprise Edition](https://github.com/tobias-weiss-ai-xr/opendesk-compose-enterprise)
 for the fully tuned multi-node deployment stack.
@@ -74,4 +74,4 @@ for the fully tuned multi-node deployment stack.
 | **Medium** | 50–500 | 💰 Commercial |
 | **Enterprise** | 500+ | 💰 Individuell |
 
-When in doubt, contact [hello@[REDACTED]](mailto:hello@[REDACTED]).
+When in doubt, contact [hello@opendesk-sme.org](mailto:hello@opendesk-sme.org).
