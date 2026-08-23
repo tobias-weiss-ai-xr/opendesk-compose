@@ -14,6 +14,8 @@ COPY . .
 RUN cargo build --release --bin opendesk-portal
 
 FROM gcr.io/distroless/cc-debian12 AS runtime
+COPY --from=busybox:1.36 /bin/busybox /busybox
+ENV PATH=/busybin:$PATH
 COPY --from=builder /app/target/release/opendesk-portal /opendesk-portal
 USER 1000:1000
 EXPOSE 8080
